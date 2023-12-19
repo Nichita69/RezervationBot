@@ -1,7 +1,9 @@
 import logging
 import re
+from datetime import datetime
 
 import environ
+from telegram import ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ConversationHandler, MessageHandler, filters
 
 environ.Env.read_env()
@@ -10,15 +12,35 @@ env = environ.Env()
 
 TELEGRAM_TOKEN = env("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
+AUTHORIZED_CHAT_ID = "621545666"
 
 NAME, PHONE, DATE, NUMBER_OF_PEOPLE = range(4)
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+BROADCAST_TEXT = range(5)
+
+user_ids = set()
+user_data = {}
+
+
+def get_base_keyboard():
+    keyboard = [["Fa rezervare"]]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
 
 async def start(update, context):
-    await update.message.reply_text("Cum vă numiți?")
+    reply_markup = get_base_keyboard()
+    user = update.effective_user
+    user_id = user.id
+    user_ids.add(user_id)
+
+    user_data[user_id] = {"first_name": user.first_name, "last_name": user.last_name}
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="Daca vreti sa faveti rezirvare abasati butonu de jos  " "Cum va numiti",
+        reply_markup=reply_markup,
+    )
     return NAME
 
 
@@ -34,6 +56,31 @@ async def name(update, context):
     return PHONE
 
 
+async def broadcast(update, context):
+    if str(update.effective_chat.id) != AUTHORIZED_CHAT_ID:
+        await update.message.reply_text("Nu aveți permisiunea de a utiliza această comandă.")
+        return ConversationHandler.END
+    await update.message.reply_text("Introduceți textul buletinului informativ:")
+    return BROADCAST_TEXT
+
+
+async def broadcast_message(update, context):
+    broadcast_content = update.message.text
+    if re.match(r"(http(s?):)([/|.|\w|\s|-])*\.(?:jpg|gif|png)", broadcast_content):
+        for user_id in user_ids:
+            try:
+                await context.bot.send_photo(chat_id=user_id, photo=broadcast_content)
+            except Exception as e:
+                logger.error(f"Nu s-a putut trimite fotografia utilizatorului {user_id}: {e}")
+    else:
+        for user_id in user_ids:
+            try:
+                await context.bot.send_message(chat_id=user_id, text=broadcast_content)
+            except Exception as e:
+                logger.error(f"Nu s-a putut trimite mesajul utilizatorului {user_id}: {e}")
+    return ConversationHandler.END
+
+
 async def phone(update, context):
     user_phone = update.message.text
     if not re.match("^\d{7,15}$", user_phone):
@@ -47,10 +94,36 @@ async def phone(update, context):
     return DATE
 
 
+async def list_users(update, context):
+    if str(update.effective_chat.id) != AUTHORIZED_CHAT_ID:
+        await update.message.reply_text("Nu aveți permisiunea de a utiliza această comandă.")
+        return
+    if not user_ids:
+        await update.message.reply_text("Lista este goală.")
+        return
+    users_list = "\n".join(
+        [f"{uid} - {user_data[uid]['first_name']} {user_data[uid].get('last_name', '')}" for uid in user_ids]
+    )
+    await update.message.reply_text(f"Lista utilizatorilor care au apăsat /start:\n{users_list}")
+
+
 async def date(update, context):
-    context.user_data["date"] = update.message.text
-    await update.message.reply_text("Câte persoane veți fi?")
-    return NUMBER_OF_PEOPLE
+    date_text = update.message.text
+    try:
+        valid_date = datetime.strptime(date_text, "%d.%m.%Y")  # Формат дд.мм.гггг
+        context.user_data["date"] = valid_date.strftime("%d.%m.%Y")
+        await update.message.reply_text("Câte persoane veți fi?")
+        return NUMBER_OF_PEOPLE
+    except ValueError:
+        await update.message.reply_text(
+            "Data introdusă este invalidă. Vă rugăm să introduceți data în formatul ZZ.LL.AAAA (de exemplu, 31.12.2021)."
+        )
+        return DATE
+
+
+async def cancel(update, context):
+    await update.message.reply_text("Anulare. Folosește /start pentru a încerca din nou.")
+    return ConversationHandler.END
 
 
 async def number_of_people(update, context):
@@ -74,26 +147,27 @@ async def number_of_people(update, context):
     return ConversationHandler.END
 
 
-async def cancel(update, context):
-    await update.message.reply_text("Anulare. Folosește /start pentru a încerca din nou.")
-    return ConversationHandler.END
-
-
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("broadcast", broadcast),
+            MessageHandler(filters.Regex("^Fa rezervare$"), start),
+        ],
         states={
             NAME: [MessageHandler(filters.TEXT, name)],
             PHONE: [MessageHandler(filters.TEXT, phone)],
             DATE: [MessageHandler(filters.TEXT, date)],
             NUMBER_OF_PEOPLE: [MessageHandler(filters.TEXT, number_of_people)],
+            BROADCAST_TEXT: [MessageHandler(filters.TEXT, broadcast_message)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-
+    list_handler = CommandHandler("list", list_users)
     app.add_handler(conv_handler)
+    app.add_handler(list_handler)
 
     app.run_polling()
 
