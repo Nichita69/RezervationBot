@@ -2,17 +2,13 @@ import logging
 import re
 from datetime import datetime
 
-import environ
-from telegram import ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ConversationHandler, MessageHandler, filters
+from telegram import ReplyKeyboardMarkup, Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ConversationHandler, MessageHandler, filters, \
+    CallbackContext
 
-environ.Env.read_env()
-
-env = environ.Env()
-
-TELEGRAM_TOKEN = env("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
-AUTHORIZED_CHAT_ID = "621545666"
+TELEGRAM_TOKEN =("6679083154:AAEUXQWGVHtszmBD8xa6_Y98q6gSF864Lls")
+TELEGRAM_CHAT_ID = ('-4062756263')
+AUTHORIZED_CHAT_ID = ("409107123")
 
 NAME, PHONE, DATE, NUMBER_OF_PEOPLE = range(4)
 
@@ -27,7 +23,9 @@ user_data = {}
 def get_base_keyboard():
     keyboard = [["Fa rezervare"]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
-
+async def handle_reservation_button(update: Update, context: CallbackContext) -> int:
+    # Resetăm conversația și începem din nou
+    return await start(update, context)
 
 async def start(update, context):
     reply_markup = get_base_keyboard()
@@ -38,7 +36,7 @@ async def start(update, context):
     user_data[user_id] = {"first_name": user.first_name, "last_name": user.last_name}
     await context.bot.send_message(
         chat_id=user_id,
-        text="Daca vreti sa faveti rezirvare abasati butonu de jos  " "Cum va numiti",
+        text="Salutare! Vă rugăm să ne scrieți numele dvs",
         reply_markup=reply_markup,
     )
     return NAME
@@ -52,7 +50,7 @@ async def name(update, context):
         )
         return NAME
     context.user_data["name"] = user_name
-    await update.message.reply_text("Care este numărul dvs de telefon?")
+    await update.message.reply_text("Scrieți mai jos numărul de telefon")
     return PHONE
 
 
@@ -110,7 +108,7 @@ async def list_users(update, context):
 async def date(update, context):
     date_text = update.message.text
     try:
-        valid_date = datetime.strptime(date_text, "%d.%m.%Y")  # Формат дд.мм.гггг
+        valid_date = datetime.strptime(date_text, "%d.%m.%Y")
         context.user_data["date"] = valid_date.strftime("%d.%m.%Y")
         await update.message.reply_text("Câte persoane veți fi?")
         return NUMBER_OF_PEOPLE
@@ -147,30 +145,33 @@ async def number_of_people(update, context):
     return ConversationHandler.END
 
 
+from telegram.ext import ConversationHandler, MessageHandler, filters
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    reservation_handler = MessageHandler(filters.Regex("^Fa rezervare$"), handle_reservation_button)
 
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start),
-            CommandHandler("broadcast", broadcast),
-            MessageHandler(filters.Regex("^Fa rezervare$"), start),
-        ],
+        entry_points=[CommandHandler("start", start),
+                      CommandHandler("broadcast", broadcast),
+                      ],
         states={
-            NAME: [MessageHandler(filters.TEXT, name)],
-            PHONE: [MessageHandler(filters.TEXT, phone)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.Regex("^Fa rezervare$"), name)],
+            PHONE: [MessageHandler(filters.TEXT & ~filters.Regex("^Fa rezervare$"), phone)],
             DATE: [MessageHandler(filters.TEXT, date)],
             NUMBER_OF_PEOPLE: [MessageHandler(filters.TEXT, number_of_people)],
             BROADCAST_TEXT: [MessageHandler(filters.TEXT, broadcast_message)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+
     list_handler = CommandHandler("list", list_users)
+
+
+    app.add_handler(reservation_handler)
     app.add_handler(conv_handler)
     app.add_handler(list_handler)
 
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
