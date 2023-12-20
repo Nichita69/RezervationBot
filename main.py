@@ -1,15 +1,16 @@
 import logging
 import re
 from datetime import datetime
-
+import environ
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ConversationHandler, MessageHandler, filters, \
     CallbackContext
+environ.Env.read_env()
 
-TELEGRAM_TOKEN =("6679083154:AAEUXQWGVHtszmBD8xa6_Y98q6gSF864Lls")
-TELEGRAM_CHAT_ID = ('-4062756263')
-AUTHORIZED_CHAT_ID = ("409107123")
-
+env = environ.Env()
+TELEGRAM_TOKEN = env("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = env("TELEGRAM_CHAT_ID")
+AUTHORIZED_CHAT_ID = "621545666"
 NAME, PHONE, DATE, NUMBER_OF_PEOPLE = range(4)
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
